@@ -37,6 +37,7 @@ case class SchemaMap(version: Int, schema: Schema)
   * stream-reactor
   */
 object KuduWriter extends StrictLogging {
+
   def apply(config: KuduConfig, settings: KuduSettings): KuduWriter = {
     val kuduMaster = config.getString(KuduConfigConstants.KUDU_MASTER)
     logger.info(s"Connecting to Kudu Master at $kuduMaster")
@@ -49,6 +50,7 @@ class KuduWriter(client: KuduClient, setting: KuduSettings) extends StrictLoggin
   with ErrorHandler with ConverterUtil {
   logger.info("Initialising Kudu writer")
 
+  private val MUTATION_BUFFER_SPACE = 1000
 
   //pre create tables
   Try(DbHandler.createTables(setting, client)) match {
@@ -67,6 +69,8 @@ class KuduWriter(client: KuduClient, setting: KuduSettings) extends StrictLoggin
     case WriteFlushMode.BATCH_BACKGROUND =>
       FlushMode.AUTO_FLUSH_BACKGROUND
   })
+
+  session.setMutationBufferSpace(MUTATION_BUFFER_SPACE)
 
   //ignore duplicate in case of redelivery
   session.isIgnoreAllDuplicateRows
@@ -104,12 +108,13 @@ class KuduWriter(client: KuduClient, setting: KuduSettings) extends StrictLoggin
     **/
   private def applyInsert(records: Set[SinkRecord], session: KuduSession) = {
     val t = Try({
-      records
+      records.iterator
         .map(r => convert(r, setting.fieldsMap(r.topic), setting.ignoreFields(r.topic)))
         .map(r => applyDDLs(r))
         .map(r => convertToKuduUpsert(r, kuduTablesCache(r.topic)))
-        .foreach(i => session.apply(i))
-      flush()
+        .map(i => session.apply(i))
+        .grouped(MUTATION_BUFFER_SPACE-1)
+        .foreach(_ => flush())
     })
     handleTry(t)
     logger.debug(s"Written ${records.size}")
