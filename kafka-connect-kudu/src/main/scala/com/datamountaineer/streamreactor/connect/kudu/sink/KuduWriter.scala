@@ -18,11 +18,12 @@ package com.datamountaineer.streamreactor.connect.kudu.sink
 
 import com.datamountaineer.streamreactor.connect.errors.ErrorHandler
 import com.datamountaineer.streamreactor.connect.kudu.KuduConverter
-import com.datamountaineer.streamreactor.connect.kudu.config.{KuduConfig, KuduConfigConstants, KuduSettings}
+import com.datamountaineer.streamreactor.connect.kudu.config.{KuduConfig, KuduConfigConstants, KuduSettings, WriteFlushMode}
 import com.datamountaineer.streamreactor.connect.schemas.ConverterUtil
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import org.apache.kafka.connect.data.Schema
 import org.apache.kafka.connect.sink.SinkRecord
+import org.apache.kudu.client.SessionConfiguration.FlushMode
 import org.apache.kudu.client._
 
 import scala.collection.JavaConverters._
@@ -48,6 +49,7 @@ class KuduWriter(client: KuduClient, setting: KuduSettings) extends StrictLoggin
   with ErrorHandler with ConverterUtil {
   logger.info("Initialising Kudu writer")
 
+
   //pre create tables
   Try(DbHandler.createTables(setting, client)) match {
     case Success(_) =>
@@ -56,6 +58,15 @@ class KuduWriter(client: KuduClient, setting: KuduSettings) extends StrictLoggin
   //cache tables
   private lazy val kuduTablesCache = collection.mutable.Map(DbHandler.buildTableCache(setting, client).toSeq: _*)
   private lazy val session = client.newSession()
+
+  session.setFlushMode(setting.writeFlushMode match {
+    case WriteFlushMode.SYNC =>
+      FlushMode.AUTO_FLUSH_SYNC
+    case WriteFlushMode.BATCH_SYNC =>
+      FlushMode.MANUAL_FLUSH
+    case WriteFlushMode.BATCH_BACKGROUND =>
+      FlushMode.AUTO_FLUSH_BACKGROUND
+  })
 
   //ignore duplicate in case of redelivery
   session.isIgnoreAllDuplicateRows
@@ -174,18 +185,27 @@ class KuduWriter(client: KuduClient, setting: KuduSettings) extends StrictLoggin
 
       //throw and let error policy handle it, don't want to throw RetriableException.
       //May want to die if error policy is Throw
-      val flush = session.flush()
-      if (flush != null) {
-        val errors = flush.asScala
-          .flatMap(r => Option(r))
-          .withFilter(_.hasRowError)
-          .map(_.getRowError.toString)
-          .mkString(";")
-
-        if (errors.nonEmpty) {
-          throw new RuntimeException(s"Failed to flush one or more changes:$errors")
-        }
+      val errors : String = session.getFlushMode match {
+        case FlushMode.AUTO_FLUSH_SYNC | FlushMode.MANUAL_FLUSH =>
+          val flush = session.flush()
+          if (flush != null) {
+            flush.asScala
+              .flatMap(r => Option(r))
+              .withFilter(_.hasRowError)
+              .map(_.getRowError.toString)
+              .mkString(";")
+          } else {
+            ""
+          }
+        case FlushMode.AUTO_FLUSH_BACKGROUND =>
+          session.getPendingErrors.getRowErrors
+            .map(_.toString)
+            .mkString(";")
       }
+      if (errors.nonEmpty) {
+        throw new RuntimeException(s"Failed to flush one or more changes:$errors")
+      }
+
     }
   }
 }
