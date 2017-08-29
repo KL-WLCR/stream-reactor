@@ -59,9 +59,9 @@ object KuduConfigConstants {
   val WRITE_FLUSH_MODE = s"${CONNECTOR_PREFIX}.write.flush.mode"
   val WRITE_FLUSH_MODE_DOC =
     """Specify kudu write mode:
-      |SYNC - flush on each sink record. Batching is disabled.
+      |SYNC - flush each sink record. Batching is disabled.
       |BATCH_BACKGROUND - flush batch of sink records in background thread.
-      |BATCH_SYNC - synced flush for each batch of sink records.
+      |BATCH_SYNC - flush batch of sink records.
     """.stripMargin
   val WRITE_FLUSH_MODE_DEFAULT = "SYNC"
 
