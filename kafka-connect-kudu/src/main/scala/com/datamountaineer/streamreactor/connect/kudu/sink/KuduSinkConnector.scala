@@ -39,7 +39,7 @@ class KuduSinkConnector extends SinkConnector with StrictLogging {
   /**
     * States which SinkTask class to use
     **/
-  override def taskClass(): Class[_ <: Task] = classOf[KuduSinkTask]
+  override def taskClass() = classOf[KuduSinkTask]
 
   /**
     * Set the configuration for each work and determine the split
@@ -47,7 +47,7 @@ class KuduSinkConnector extends SinkConnector with StrictLogging {
     * @param maxTasks The max number of task workers be can spawn
     * @return a List of configuration properties per worker
     **/
-  override def taskConfigs(maxTasks: Int): util.List[util.Map[String, String]] = {
+  override def taskConfigs(maxTasks: Int) = {
     logger.info(s"Setting task configurations for $maxTasks workers.")
     (1 to maxTasks).map(_ => configProps.get).toList
   }
